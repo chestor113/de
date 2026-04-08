@@ -1,0 +1,155 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: airflow-postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  spark-master:
+    image: apache/spark:3.5.8-scala2.12-java17-python3-r-ubuntu
+    container_name: spark-master
+    hostname: spark-master
+    command:
+      [
+        "/opt/spark/bin/spark-class",
+        "org.apache.spark.deploy.master.Master"
+      ]
+    environment:
+      SPARK_HISTORY_OPTS: "-Dspark.history.fs.logDirectory=file:/opt/spark/spark-events"
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+      - "4040:4040"
+      - "4041:4041"
+      - "4042:4042"
+    volumes:
+      - ./jobs:/opt/spark/jobs
+      - ./data:/opt/spark/data
+      - ./logs:/opt/spark/custom-logs
+      - ./spark-events:/opt/spark/spark-events
+
+  spark-worker:
+    image: apache/spark:3.5.8-scala2.12-java17-python3-r-ubuntu
+    container_name: spark-worker
+    hostname: spark-worker
+    depends_on:
+      - spark-master
+    command:
+      [
+        "/opt/spark/bin/spark-class",
+        "org.apache.spark.deploy.worker.Worker",
+        "spark://spark-master:7077"
+      ]
+    environment:
+      SPARK_WORKER_MEMORY: 4g
+      SPARK_WORKER_CORES: 2
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./jobs:/opt/spark/jobs
+      - ./data:/opt/spark/data
+      - ./logs:/opt/spark/custom-logs
+      - ./spark-events:/opt/spark/spark-events
+
+  spark-history-server:
+    image: apache/spark:3.5.8-scala2.12-java17-python3-r-ubuntu
+    container_name: spark-history-server
+    hostname: spark-history-server
+    depends_on:
+      - spark-master
+    command:
+      [
+        "/opt/spark/bin/spark-class",
+        "org.apache.spark.deploy.history.HistoryServer"
+      ]
+    environment:
+      SPARK_HISTORY_OPTS: "-Dspark.history.fs.logDirectory=file:/opt/spark/spark-events -Dspark.history.ui.port=18080"
+    ports:
+      - "18080:18080"
+    volumes:
+      - ./spark-events:/opt/spark/spark-events
+
+  airflow-init:
+    image: apache/airflow:2.9.3
+    container_name: airflow-init
+    depends_on:
+      - postgres
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      AIRFLOW_UID: "50000"
+    user: "0:0"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./jobs:/opt/airflow/jobs
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./config:/opt/airflow/config
+    command: >
+      bash -c "
+      airflow db migrate &&
+      airflow users create
+      --username admin
+      --password admin
+      --firstname admin
+      --lastname admin
+      --role Admin
+      --email admin@example.com
+      "
+
+  airflow-webserver:
+    image: apache/airflow:2.9.3
+    container_name: airflow-webserver
+    restart: always
+    depends_on:
+      - postgres
+      - airflow-init
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      AIRFLOW_UID: "50000"
+    ports:
+      - "8088:8080"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./jobs:/opt/airflow/jobs
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./config:/opt/airflow/config
+    command: webserver
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.3
+    container_name: airflow-scheduler
+    restart: always
+    depends_on:
+      - postgres
+      - airflow-init
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      AIRFLOW_UID: "50000"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./jobs:/opt/airflow/jobs
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./config:/opt/airflow/config
+    command: scheduler
+
+volumes:
+  postgres_data:
