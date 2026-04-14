@@ -1,3 +1,6 @@
 logs/
 data/
 spark-events/
+__pyspark__/
+.env
+*.pyc
