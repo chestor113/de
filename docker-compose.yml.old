@@ -14,9 +14,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
   spark-master:
-    build:
-      context: .
-      dockerfile: Dockerfile.spark
+    image: apache/spark:3.5.8-scala2.12-java17-python3-r-ubuntu
     container_name: spark-master
     hostname: spark-master
     command:
@@ -39,9 +37,7 @@ services:
       - ./spark-events:/opt/spark/spark-events
 
   spark-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.spark
+    image: apache/spark:3.5.8-scala2.12-java17-python3-r-ubuntu
     container_name: spark-worker
     hostname: spark-worker
     depends_on:
@@ -53,8 +49,8 @@ services:
         "spark://spark-master:7077"
       ]
     environment:
-      SPARK_WORKER_MEMORY: 8g
-      SPARK_WORKER_CORES: 3
+      SPARK_WORKER_MEMORY: 4g
+      SPARK_WORKER_CORES: 2
     ports:
       - "8081:8081"
     volumes:
@@ -64,9 +60,7 @@ services:
       - ./spark-events:/opt/spark/spark-events
 
   spark-history-server:
-    build:
-      context: .
-      dockerfile: Dockerfile.spark
+    image: apache/spark:3.5.8-scala2.12-java17-python3-r-ubuntu
     container_name: spark-history-server
     hostname: spark-history-server
     depends_on:
