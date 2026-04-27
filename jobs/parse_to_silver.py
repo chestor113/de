@@ -17,7 +17,7 @@ def main():
 
     spark.sparkContext.setLogLevel("ERROR")
 
-    init_df = spark.read.parquet("s3a://datalake/raw/topic1/year=2026/")
+    init_df = spark.read.parquet("s3a://datalake/raw/topic1/")
 
     schema = StructType([
         StructField("gender", StringType(), True),
@@ -64,7 +64,12 @@ def main():
         col("payload_json.location.country").alias("country"),
         col("payload_json.location.city").alias("city"),
         to_timestamp(col("payload_json.registered.date")).alias("registered_date"),
-        to_timestamp(col("payload_json.dob.date")).alias("dob_date")
+        to_timestamp(col("payload_json.dob.date")).alias("dob_date"),
+        col("kafka_timestamp"),
+        col("year"),
+        col("month"),
+        col("day"),
+        col("hour")
     )
 
     silver_df = silver_df.withColumn(
@@ -75,12 +80,13 @@ def main():
         lit("randomuser.api")
     )
 
-    silver_df.write.mode("overwrite").parquet(
-        "s3a://datalake/silver/users/"
-    )
+    silver_df.write \
+    .mode("overwrite") \
+    .partitionBy("year", "month", "day", "hour") \
+    .parquet("s3a://datalake/silver/users/")
 
     df_silver = spark.read.parquet("s3a://datalake/silver/users/")
-
+    df_silver.show(3, truncate=False)
 
 
 
