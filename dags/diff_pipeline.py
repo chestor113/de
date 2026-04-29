@@ -1,93 +1,55 @@
-from airflow.decorators import dag, task
-from airflow.operators.bash import BashOperator
+from airflow import DAG
+from airflow.operators.python import PythonOperator
 from datetime import datetime
-import boto3
-import re
+import subprocess
+
+from parse_part import discover_partitions
 
 
-def discover_partitions(data: str):
-    s3 = boto3.client(
-        "s3",
-        endpoint_url="http://192.168.0.215:9000",
-        aws_access_key_id="admin",
-        aws_secret_access_key="adminadmin",
-    )
-
-    bucket = "datalake"
-
-    paths = []
-
-    paginator = s3.get_paginator("list_objects_v2")
-
-    for page in paginator.paginate(Bucket=bucket, Prefix=data):
-        for obj in page.get("Contents", []):
-            paths.append(obj["Key"])
-
-    pattern = re.compile(
-        r"year=(\d+)/month=(\d+)/day=(\d+)/hour=(\d+)/"
-    )   
-
-    partitions = set()
-
-    for path in paths:
-        match = pattern.search(path)
-        if match:
-            year, month, day, hour = match.groups()
-            partition = (
-                int(year),
-                int(month),
-                int(day),
-                int(hour)
-            )
-
-            partitions.add(partition)
-    return partitions
-
-@task
-def get_diff():
+def run_diff():
     raw = discover_partitions("raw/topic1/")
     silver = discover_partitions("silver/users/")
 
     diff = raw - silver
 
-    result = []
+    print("RAW:", raw)
+    print("SILVER:", silver)
+    print("DIFF:", diff)
+
     for y, m, d, h in diff:
-        result.append({
-            "year": y,
-            "month": m,
-            "day": d,
-            "hour": h
-        })
+        cmd = f"""
+        spark-submit \
+        --master spark://spark-master:7077 \
+        /opt/airflow/jobs/parse_to_silver.py \
+        --year {y} --month {m:02d} --day {d:02d} --hour {h:02d}
+        """
 
-    return result
+        print("RUN:", cmd)
+
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            text=True,
+            capture_output=True
+        )
+
+        print("STDOUT:")
+        print(result.stdout)
+
+        print("STDERR:")
+        print(result.stderr)
+
+        result.check_returncode()
 
 
-# --- DAG ---
-@dag(
+with DAG(
+    dag_id="diff_pipeline",
     start_date=datetime(2026, 4, 1),
     schedule=None,
-    catchup=False
-)
-def raw_to_silver_diff():
+    catchup=False,
+) as dag:
 
-    partitions = get_diff()
-
-    BashOperator.partial(
-        task_id="run_spark"
-    ).expand(
-        bash_command=[
-            f"""
-            spark-submit \
-              --master spark://spark-master:7077 \
-              /opt/airflow/jobs/parse_to_silver.py \
-              --year {p['year']} \
-              --month {p['month']} \
-              --day {p['day']} \
-              --hour {p['hour']}
-            """
-            for p in partitions
-        ]
+    run_diff_task = PythonOperator(
+        task_id="run_diff",
+        python_callable=run_diff,
     )
-
-
-dag = raw_to_silver_diff()

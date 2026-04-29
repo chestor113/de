@@ -15,16 +15,19 @@ def main():
 
     args = parser.parse_args()
 
+    month = int(args.month)
+    day = int(args.day)
+    hour = int(args.hour)
+    year = int(args.year)
+
     input_path = (
         f"s3a://datalake/raw/topic1/"
-        f"year={args.year}/"
-        f"month={args.month}/"
-        f"day={args.day}/"
-        f"hour={args.hour}/"
+        f"year={year}/month={month:02d}/day={day:02d}/hour={hour:02d}/"
     )
-
+            
+      
     print(f"Processing: {input_path}")
-    
+
     spark = SparkSession.builder \
     .appName("parse_to_silver") \
     .config("spark.hadoop.fs.s3a.endpoint", "http://192.168.0.215:9000") \
