@@ -3,21 +3,42 @@ from pyspark.sql.functions import col, from_json
 from pyspark.sql.types import StructType, StructField, StringType
 from pyspark.sql.functions import sha2, current_timestamp, lit, concat_ws
 from pyspark.sql.functions import to_timestamp
+import argparse
 
 def main():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--year", required=True)
+    parser.add_argument("--month", required=True)
+    parser.add_argument("--day", required=True)
+    parser.add_argument("--hour", required=True)
+
+    args = parser.parse_args()
+
+    input_path = (
+        f"s3a://datalake/raw/topic1/"
+        f"year={args.year}/"
+        f"month={args.month}/"
+        f"day={args.day}/"
+        f"hour={args.hour}/"
+    )
+
+    print(f"Processing: {input_path}")
+    
     spark = SparkSession.builder \
-    .appName("test_job") \
+    .appName("parse_to_silver") \
     .config("spark.hadoop.fs.s3a.endpoint", "http://192.168.0.215:9000") \
     .config("spark.hadoop.fs.s3a.access.key", "admin") \
     .config("spark.hadoop.fs.s3a.secret.key", "adminadmin") \
     .config("spark.hadoop.fs.s3a.path.style.access", "true") \
     .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
     .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
+    .config("spark.sql.sources.partitionOverwriteMode", "dynamic") \
     .getOrCreate()
 
     spark.sparkContext.setLogLevel("ERROR")
 
-    init_df = spark.read.parquet("s3a://datalake/raw/topic1/")
+    init_df = spark.read.parquet(input_path)
 
     schema = StructType([
         StructField("gender", StringType(), True),
@@ -65,20 +86,27 @@ def main():
         col("payload_json.location.city").alias("city"),
         to_timestamp(col("payload_json.registered.date")).alias("registered_date"),
         to_timestamp(col("payload_json.dob.date")).alias("dob_date"),
+        col("kafka_partition"),
+        col("kafka_offset"),
         col("kafka_timestamp"),
-        col("year"),
-        col("month"),
-        col("day"),
-        col("hour")
+        lit(int(args.year)).alias("year"),
+        lit(int(args.month)).alias("month"),
+        lit(int(args.day)).alias("day"),
+        lit(int(args.hour)).alias("hour")
     )
 
     silver_df = silver_df.withColumn(
         "ingest_dts",
-        current_timestamp()
+        current_timestamp()  
     ).withColumn(
         "record_source",
         lit("randomuser.api")
     )
+
+    silver_df = silver_df.dropDuplicates([
+        "kafka_partition",
+        "kafka_offset"
+    ])  
 
     silver_df.write \
     .mode("overwrite") \
