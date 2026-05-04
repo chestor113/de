@@ -116,8 +116,6 @@ def main():
     .partitionBy("year", "month", "day", "hour") \
     .parquet("s3a://datalake/silver/users/")
 
-    df_silver = spark.read.parquet("s3a://datalake/silver/users/")
-    df_silver.show(3, truncate=False)
 
 
 
