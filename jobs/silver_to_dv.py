@@ -1,5 +1,6 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, sha2, current_timestamp, lit, concat_ws
+from pyspark.sql.types import StringType, TimestampType
 
 
 def main():
@@ -30,6 +31,13 @@ def main():
         "load_dts", current_timestamp()
     ).withColumn(
         "record_source", lit("randomuser.api")
+    )
+
+    df_hub = df_hub.select(
+        col("user_hk").cast(StringType()).alias("user_hk"),
+        col("user_bk").cast(StringType()).alias("user_bk"),
+        col("load_dts").cast(TimestampType()).alias("load_dts"),
+        col("record_source").cast(StringType()).alias("record_source")
     )
 
     try:
@@ -81,23 +89,38 @@ def main():
         "load_dts",
         current_timestamp()
     )
-
     df_sat = df_sat.select(
-        "user_hk",
-        "load_dts",
-        "hashdiff",
-        "gender",
-        "first_name",
-        "last_name",
-        "email",
-        "country",
-        "city",
-        "registered_date",
-        "dob_date"
+        col("user_hk").cast(StringType()).alias("user_hk"),
+        col("load_dts").cast(TimestampType()).alias("load_dts"),
+        col("hashdiff").cast(StringType()).alias("hashdiff"),
+        col("gender").cast(StringType()).alias("gender"),
+        col("first_name").cast(StringType()).alias("first_name"),
+        col("last_name").cast(StringType()).alias("last_name"),
+        col("email").cast(StringType()).alias("email"),
+        col("country").cast(StringType()).alias("country"),
+        col("city").cast(StringType()).alias("city"),
+        col("registered_date").cast(TimestampType()).alias("registered_date"),
+        col("dob_date").cast(TimestampType()).alias("dob_date")
     )
 
-    # SAT пока оставляем full refresh
-    df_sat.write.mode("overwrite").parquet(sat_path)
+    df_sat = df_sat.dropDuplicates(["user_hk", "hashdiff"])
+
+    try:
+        existing_sat = spark.read.parquet(sat_path)
+
+        new_sat = df_sat.join(
+            existing_sat.select("user_hk", "hashdiff"),
+            on=["user_hk", "hashdiff"],
+            how="left_anti"
+        )
+
+        print("NEW SAT ROWS:", new_sat.count())
+
+        new_sat.write.mode("append").parquet(sat_path)
+
+    except Exception:
+        print("SAT NOT FOUND, INITIAL LOAD")
+        df_sat.write.mode("overwrite").parquet(sat_path)
 
     hub_check = spark.read.parquet(hub_path)
     sat_check = spark.read.parquet(sat_path)
